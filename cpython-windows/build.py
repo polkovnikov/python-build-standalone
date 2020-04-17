@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import multiprocessing
 
 from pythonbuild.downloads import DOWNLOADS
 from pythonbuild.cpython import parse_config_c, STDLIB_TEST_PACKAGES
@@ -32,6 +33,9 @@ SUPPORT = ROOT / "cpython-windows"
 
 LOG_PREFIX = [None]
 LOG_FH = [None]
+
+USE_CLCACHE = True
+CLCACHE_BUILD_TYPE = "script" # pyinstaller / script
 
 # Extensions that need to be converted from standalone to built-in.
 # Key is name of VS project representing the standalone extension.
@@ -1093,6 +1097,8 @@ def build_openssl_for_arch(
     nasm_archive,
     build_root: pathlib.Path,
     profile: str,
+    *,
+    clcache_paths
 ):
     openssl_version = DOWNLOADS["openssl"]["version"]
     nasm_version = DOWNLOADS["nasm-windows-bin"]["version"]
@@ -1107,6 +1113,9 @@ def build_openssl_for_arch(
     env = dict(os.environ)
     # Add Perl and nasm paths to front of PATH.
     env["PATH"] = "%s;%s;%s" % (perl_path.parent, nasm_path, env["PATH"])
+    
+    if clcache_paths is not None:
+        env["PATH"] = "%s;%s" % (clcache_paths[0], env["PATH"])
 
     source_root = build_root / ("openssl-%s" % openssl_version)
 
@@ -1139,6 +1148,15 @@ def build_openssl_for_arch(
     dest_dir = build_root / "install"
     env["DESTDIR"] = str(dest_dir)
     install_root = dest_dir / prefix
+    
+    if True:
+        with open(str(source_root / 'Configurations' / 'windows-makefile.tmpl'), 'r', encoding = 'utf-8') as f:
+            rf = f.read()
+        with open(str(source_root / 'Configurations' / 'windows-makefile.tmpl'), 'w', encoding = 'utf-8') as f:
+            f.write(rf.replace(
+                r'\$(CC) $cflags -c \$(COUTFLAG)\$\@ $srcs',
+                r'\$(CC) $cflags -c \$(COUTFLAG)\$\@ $srcs' + ' 2>&1 > $obj.dbad',
+            ))
 
     exec_and_log(
         [
@@ -1150,10 +1168,22 @@ def build_openssl_for_arch(
             "--prefix=/%s" % prefix,
         ],
         source_root,
-        env,
+        {
+            **env,
+            'CC': 'cl.exe' if clcache_paths is None else clcache_paths[1],
+        },
     )
 
-    exec_and_log(["nmake"], source_root, env)
+    if clcache_paths is not None:
+        for e in ["ossl_static.pdb", "dso.pdb", "app.pdb"]:
+            (source_root / e).touch()
+        with open(str(source_root / "makefile"), "r", encoding = "utf-8") as f:
+            rf = f.read()
+        with open(str(source_root / "makefile"), "w", encoding = "utf-8") as f:
+            f.write(re.sub(r"/Zi /Fd.*?\.pdb", "/Z7", rf))
+
+    #exec_and_log(["nmake"], source_root, env)
+    exec_and_log(["jom", "/J", str(multiprocessing.cpu_count())], source_root, env)
 
     # We don't care about accessory files, docs, etc. So just run `install_sw`
     # target to get the main files.
@@ -1180,16 +1210,26 @@ def build_openssl(perl_path: pathlib.Path, arch: str, profile: str):
 
         root_32 = td / "x86"
         root_64 = td / "x64"
+        
+        root_cur = {"x86": root_32, "amd64": root_64}[arch]
+        
+        root_cur.mkdir()
+        
+        if USE_CLCACHE:
+            log("fetching/preparing clcache")
+            clcache_paths = fetch_clcache(root_cur)
+        else:
+            clcache_paths = None
 
         if arch == "x86":
-            root_32.mkdir()
             build_openssl_for_arch(
-                perl_path, "x86", openssl_archive, nasm_archive, root_32, profile
+                perl_path, "x86", openssl_archive, nasm_archive, root_32, profile,
+                clcache_paths = clcache_paths,
             )
         elif arch == "amd64":
-            root_64.mkdir()
             build_openssl_for_arch(
-                perl_path, "amd64", openssl_archive, nasm_archive, root_64, profile
+                perl_path, "amd64", openssl_archive, nasm_archive, root_64, profile,
+                clcache_paths = clcache_paths,
             )
         else:
             raise ValueError("unhandled arch: %s" % arch)
@@ -1929,6 +1969,29 @@ def fetch_strawberry_perl() -> pathlib.Path:
         zf.extractall(strawberryperl)
     return strawberryperl
 
+def fetch_clcache(install_dir: pathlib.Path) -> pathlib.Path:
+    clcache_zip = download_entry("clcache", BUILD)
+    clcache_dir = install_dir / "clcache"
+    clcache_dir.mkdir(exist_ok = True)
+    with zipfile.ZipFile(clcache_zip) as zf:
+        zf.extractall(clcache_dir)
+    clcache_sdir = list(clcache_dir.iterdir())[0]
+    if CLCACHE_BUILD_TYPE == "pyinstaller":
+        subprocess.run(
+            [str(BUILD / "venv" / "Scripts" / "pyinstaller.exe"), "--noupx", "pyinstaller/clcache_main.py"],
+            cwd = str(clcache_sdir), check = True,
+        )
+        exe_dir, exe_file = clcache_sdir / "dist" / "clcache_main", "clcache_main"
+    elif CLCACHE_BUILD_TYPE == "script":
+        with open(str(clcache_sdir / "clcache_cmd.cmd"), "w", encoding = "ascii") as f:
+            f.write(
+                "@set \"PYTHONPATH=" + str(clcache_sdir) + "\"\n" +
+                "@call \"" + str(BUILD / "venv" / "Scripts" / "python.exe") + "\" \"" + str(clcache_sdir / "clcache" / "__main__.py") + "\" %* || @exit /b"
+            )
+        exe_dir, exe_file = clcache_sdir, "clcache_cmd"
+    else:
+        assert False, CLCACHE_BUILD_TYPE
+    return exe_dir, exe_file
 
 def main():
     BUILD.mkdir(exist_ok=True)

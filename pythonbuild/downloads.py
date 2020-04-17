@@ -40,6 +40,12 @@ DOWNLOADS = {
         "sha256": "6a7da64d3a0a7320577b68b9ca4933bdcab676e898b759850e827333c3282c75",
         "version": "10.0.0",
     },
+    "clcache": {
+        "url": "https://github.com/frerich/clcache/archive/cae73d8255d78db8ba11e23c51fd2c9a89e7475b.zip",
+        "size": 101932,
+        "sha256": "7b2ad97719f8f94d639a261a1294365f9f5de96aae6334bc2e9a9292e547dae6",
+        "version": "4.2.0-dev",
+    },
     "cmake-linux-bin": {
         "url": "https://github.com/Kitware/CMake/releases/download/v3.15.1/cmake-3.15.1-Linux-x86_64.tar.gz",
         "size": 38995343,
