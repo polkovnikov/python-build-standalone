@@ -1243,8 +1243,9 @@ def build_openssl_for_arch(
 
     # We don't care about accessory files, docs, etc. So just run `install_sw`
     # target to get the main files.
-    exec_and_log(["nmake", "install_sw"], source_root, env)
-
+    #exec_and_log(["nmake", "install_sw"], source_root, env)
+    exec_and_log([str(jom_path / "jom"), "install_sw"], source_root, env)
+    
     # Copy the _static libraries as well.
     for l in ("crypto", "ssl"):
         basename = "lib%s_static.lib" % l
