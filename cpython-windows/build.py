@@ -1171,6 +1171,10 @@ def build_openssl_for_arch(
             configure,
             "no-idea",
             "no-mdc2",
+            "no-makedepend",
+            "no-buildtest-c++",
+            "no-external-tests",
+            "no-tests",
             "--prefix=/%s" % prefix,
         ],
         source_root,
@@ -1188,6 +1192,47 @@ def build_openssl_for_arch(
             rf = f.read()
         with open(str(source_root / "makefile"), "w", encoding = "utf-8") as f:
             f.write(re.sub(r"/Zi /Fd.*?\.pdb", "/Z7", rf))
+
+        with open(str(source_root / "makefile"), "r", encoding = "utf-8") as f:
+            rf = f.read()
+        #apps\app_rand.obj: "apps\app_rand.c"
+        #    $(CC)  $(LIB_CFLAGS) /I "." /I "include" $(LIB_CPPFLAGS) -c $(COUTFLAG)$@ "apps\app_rand.c" 2>&1 > apps\app_rand.dbad
+        #crypto\ec\curve448\arch_32\f_impl.obj: "crypto\ec\curve448\arch_32\f_impl.c"
+        #    $(CC)  $(LIB_CFLAGS) /I "." /I "include" /I "crypto\ec\curve448\arch_32" /I "crypto\ec\curve448" $(LIB_CPPFLAGS) -c $(COUTFLAG)$@ "crypto\ec\curve448\arch_32\f_impl.c" 2>&1 > crypto\ec\curve448\arch_32\f_impl.dbad
+        build_c_re = re.compile(r'\s*((\S+?)\\[^\.\\]+\.obj)\:\s*(\"[^\"]+?\.c\")\s*\n\s*%s.+?\n' % (
+            #re.escape('$(CC)  $(LIB_CFLAGS) /I "." /I "include" $(LIB_CPPFLAGS) -c $(COUTFLAG)$@')
+            re.escape('$(CC)  $(LIB_CFLAGS) /I "." /I "include" ') + r'((?:\/I \".*?\" )*)' + re.escape('$(LIB_CPPFLAGS) -c $(COUTFLAG)$@')
+        ))
+        ms = list(re.finditer(build_c_re, rf))
+        assert len(ms) >= 10, str(build_c_re)
+        gsize = 50
+        ms_byp = {}
+        for m in ms:
+            k, k2 = m.group(2), m.group(4)
+            ms_byp[k] = ms_byp.get(k, {})
+            ms_byp[k][k2] = ms_byp[k].get(k2, [[]])
+            ms_byp[k][k2][-1] += [m]
+            if len(ms_byp[k][k2][-1]) >= gsize:
+                ms_byp[k][k2] += [[]]
+        repls = []
+        for gdir, gmsl in sorted(ms_byp.items(), key = lambda e: e[0]):
+            ig = -1
+            for xflags, sgmsl in gmsl.items():
+                for gms in sgmsl:
+                    ig += 1
+                    if len(gms) == 0:
+                        break
+                    c_files = ' '.join([m.group(3) for m in gms])
+                    starget = 'build_c_all__%s__%s' % (gdir.replace('\\', '__'), ig)
+                    for m in gms:
+                        repls += [(m.start(), m.end(), m.expand(r'\n\1: %s\n' % starget))]
+                    rf += ('\n%s: %s\n\t$(CC)  $(LIB_CFLAGS) /I "." /I "include" ' + xflags + '$(LIB_CPPFLAGS) -c $(COUTFLAG)%s/ %s 2>&1 > %s/%s.log\n') % (
+                        starget, c_files, gdir, c_files, gdir, starget,
+                    )
+        for r in sorted(repls, key = lambda e: e[0], reverse = True):
+            rf = rf[:r[0]] + r[2] + rf[r[1]:]
+        with open(str(source_root / "makefile"), "w", encoding = "utf-8") as f:
+            f.write(rf)
 
     # exec_and_log(["nmake"], source_root, env)
     exec_and_log(
@@ -1217,7 +1262,10 @@ def build_openssl(perl_path: pathlib.Path, arch: str, profile: str):
     nasm_archive = download_entry("nasm-windows-bin", BUILD)
     jom_archive = download_entry("jom-windows-bin", BUILD)
 
-    with tempfile.TemporaryDirectory(prefix="openssl-build-") as td:
+    #with tempfile.TemporaryDirectory(prefix="openssl-build-") as td:
+    if True:
+        td = pathlib.Path(r'C:\dev\_3party\_arty\python-build-standalone\build\openssl-build')
+        td.mkdir(exist_ok = True)
         td = pathlib.Path(td)
 
         root_32 = td / "x86"
@@ -1225,7 +1273,7 @@ def build_openssl(perl_path: pathlib.Path, arch: str, profile: str):
         
         root_cur = {"x86": root_32, "amd64": root_64}[arch]
         
-        root_cur.mkdir()
+        root_cur.mkdir(exist_ok = True)
         
         if USE_CLCACHE:
             log("fetching/preparing clcache")
