@@ -23,6 +23,7 @@ from pythonbuild.utils import (
     create_tar_from_directory,
     download_entry,
     extract_tar_to_directory,
+    extract_zip_to_directory,
     compress_python_archive,
 )
 
@@ -1098,21 +1099,26 @@ def build_openssl_for_arch(
     build_root: pathlib.Path,
     profile: str,
     *,
-    clcache_paths
+    jom_archive,
+    clcache_paths,
 ):
     openssl_version = DOWNLOADS["openssl"]["version"]
     nasm_version = DOWNLOADS["nasm-windows-bin"]["version"]
+    jom_version = DOWNLOADS["jom-windows-bin"]["version"]
 
     log("extracting %s to %s" % (openssl_archive, build_root))
     extract_tar_to_directory(openssl_archive, build_root)
     log("extracting %s to %s" % (nasm_archive, build_root))
     extract_tar_to_directory(nasm_archive, build_root)
+    log("extracting %s to %s" % (jom_archive, build_root))
+    extract_zip_to_directory(jom_archive, build_root / "jom")
 
     nasm_path = build_root / ("cpython-bin-deps-nasm-%s" % nasm_version)
+    jom_path = build_root / "jom"
 
     env = dict(os.environ)
     # Add Perl and nasm paths to front of PATH.
-    env["PATH"] = "%s;%s;%s" % (perl_path.parent, nasm_path, env["PATH"])
+    env["PATH"] = "%s;%s;%s;%s" % (perl_path.parent, nasm_path, jom_path, env["PATH"])
     
     if clcache_paths is not None:
         env["PATH"] = "%s;%s" % (clcache_paths[0], env["PATH"])
@@ -1171,6 +1177,7 @@ def build_openssl_for_arch(
         {
             **env,
             'CC': 'cl.exe' if clcache_paths is None else clcache_paths[1],
+            "CFLAGS": env.get("CFLAGS", "") + " /FS",
         },
     )
 
@@ -1182,8 +1189,12 @@ def build_openssl_for_arch(
         with open(str(source_root / "makefile"), "w", encoding = "utf-8") as f:
             f.write(re.sub(r"/Zi /Fd.*?\.pdb", "/Z7", rf))
 
-    #exec_and_log(["nmake"], source_root, env)
-    exec_and_log(["jom", "/J", str(multiprocessing.cpu_count())], source_root, env)
+    # exec_and_log(["nmake"], source_root, env)
+    exec_and_log(
+        [str(jom_path / "jom"), "/J", str(multiprocessing.cpu_count())],
+        source_root,
+        env,
+    )
 
     # We don't care about accessory files, docs, etc. So just run `install_sw`
     # target to get the main files.
@@ -1204,6 +1215,7 @@ def build_openssl(perl_path: pathlib.Path, arch: str, profile: str):
     # First ensure the dependencies are in place.
     openssl_archive = download_entry("openssl", BUILD)
     nasm_archive = download_entry("nasm-windows-bin", BUILD)
+    jom_archive = download_entry("jom-windows-bin", BUILD)
 
     with tempfile.TemporaryDirectory(prefix="openssl-build-") as td:
         td = pathlib.Path(td)
@@ -1223,13 +1235,25 @@ def build_openssl(perl_path: pathlib.Path, arch: str, profile: str):
 
         if arch == "x86":
             build_openssl_for_arch(
-                perl_path, "x86", openssl_archive, nasm_archive, root_32, profile,
-                clcache_paths = clcache_paths,
+                perl_path,
+                "x86",
+                openssl_archive,
+                nasm_archive,
+                root_32,
+                profile,
+                jom_archive=jom_archive,
+                clcache_paths=clcache_paths,
             )
         elif arch == "amd64":
             build_openssl_for_arch(
-                perl_path, "amd64", openssl_archive, nasm_archive, root_64, profile,
-                clcache_paths = clcache_paths,
+                perl_path,
+                "amd64",
+                openssl_archive,
+                nasm_archive,
+                root_64,
+                profile,
+                jom_archive=jom_archive,
+                clcache_paths=clcache_paths,
             )
         else:
             raise ValueError("unhandled arch: %s" % arch)
@@ -2035,7 +2059,10 @@ def main():
 
         LOG_PREFIX[0] = "cpython"
         tar_path = build_cpython(
-            args.python, arch, sh_exe=pathlib.Path(args.sh), profile=args.profile
+            args.python,
+            arch,
+            sh_exe=pathlib.Path(args.sh) if args.sh else None,
+            profile=args.profile,
         )
 
         compress_python_archive(
