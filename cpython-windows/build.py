@@ -25,6 +25,7 @@ from pythonbuild.utils import (
     extract_tar_to_directory,
     extract_zip_to_directory,
     compress_python_archive,
+    file_text_replace,
 )
 
 ROOT = pathlib.Path(os.path.abspath(__file__)).parent.parent
@@ -1224,6 +1225,9 @@ def build_openssl_for_arch(
         source_root,
         {**env, "CFLAGS": env.get("CFLAGS", "") + " /FS",},
     )
+    
+    if 'shared' not in profile:
+        file_text_replace(source_root / 'makefile', ('/MD', '/MT'))
 
     # exec_and_log(["nmake"], source_root, env)
     exec_and_log(

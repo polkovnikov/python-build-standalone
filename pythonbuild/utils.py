@@ -253,24 +253,30 @@ def exec_and_log(args, cwd, env):
         print("process exited %d" % p.returncode)
         sys.exit(p.returncode)
 
-def file_text_replace(fname, repls, *, enc = 'utf-8', dst_fname = None):
-    if dst_fname is None:
-        dst_fname = fname
-    with open(fname, 'r', encoding = enc) as f:
-        text = f.read()
-    for rfrom, rto in repls:
-        if type(rfrom) is str:
-            assert type(rto) is str
-            text = text.replace(rfrom, rto)
-        elif type(rfrom) is re.Pattern:
-            if type(rto) is str:
-                text = re.sub(rfrom, rto, text)
-            elif callable(rto):
-                for m in reversed(list(re.finditer(rfrom, text))):
-                    text = text[:m.start()] + rto(m) + text[m.end():]
+def file_text_replace(fnames, repls, *, enc = 'utf-8'):
+    if type(fnames) not in [tuple, list]:
+        fnames = [(fnames, fnames)]
+    elif type(fnames) is tuple:
+        fnames = [fnames]
+    for sfname, dfname in fnames:
+        with open(str(sfname), 'r', encoding = enc) as f:
+            text = f.read()
+        if type(repls) is tuple:
+            repls = [repls]
+        assert type(repls) is list
+        for rfrom, rto in repls:
+            if type(rfrom) is str:
+                assert type(rto) is str
+                text = text.replace(rfrom, rto)
+            elif type(rfrom) is re.Pattern:
+                if type(rto) is str:
+                    text = re.sub(rfrom, rto, text)
+                elif callable(rto):
+                    for m in reversed(list(re.finditer(rfrom, text))):
+                        text = text[:m.start()] + rto(m) + text[m.end():]
+                else:
+                    assert False
             else:
                 assert False
-        else:
-            assert False
-    with open(dst_fname, 'w', encoding = enc) as f:
-        f.write(text)
+        with open(str(dfname), 'w', encoding = enc) as f:
+            f.write(text)
