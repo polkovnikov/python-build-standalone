@@ -314,7 +314,7 @@ def file_xml_edit(fnames, repls, *, save_opts = {}):
             op = repl[0]
             path = repl[1]
             if type(path) is list:
-                path = '//' + '/'.join([AddNS(p) for p in path])
+                path = '/' + '/'.join([AddNS(p) for p in path])
             for el in tree.xpath(path, namespaces = nss):
                 if op == 'del':
                     el.getparent().remove(el)
@@ -323,33 +323,43 @@ def file_xml_edit(fnames, repls, *, save_opts = {}):
                         child = etree.XML(repl[2])
                         el.getparent().replace(el, child)
                     except:
-                        assert type(repl[2]) is str
+                        assert type(repl[2]) is str or callable(repl[2])
                         child = repl[2]
-                        el.text = child
+                        if type(child) is str:
+                            el.text = child
+                        else:
+                            child(el)
                 elif op == 'add':
                     try:
                         el.append(etree.XML(repl[2]))
                     except:
-                        assert type(repl[2]) is str
-                        el.text += repl[2]
+                        assert type(repl[2]) is str or callable(repl[2])
+                        if type(repl[2]) is str:
+                            el.text += repl[2]
+                        else:
+                            repl[2](el)
                 elif op in ['repc', 'addc']:
                     spath = repl[2]
                     assert type(spath) is list
                     try:
                         child = etree.XML(repl[3])
                     except:
-                        assert type(repl[3]) is str
+                        assert type(repl[3]) is str or callable(repl[3])
                         child = repl[3]
                     def Rec(node = el, ispath = 0):
                         if ispath >= len(spath):
                             if op == 'repc':
                                 if type(child) is str:
                                     node.text = child
+                                elif callable(child):
+                                    child(node)
                                 else:
                                     node.getparent().replace(node, child)
                             elif op == 'addc':
                                 if type(child) is str:
                                     node.text += child
+                                elif callable(child):
+                                    child(node)
                                 else:
                                     node.append(child)
                             else:

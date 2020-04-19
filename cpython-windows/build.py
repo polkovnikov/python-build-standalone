@@ -26,6 +26,7 @@ from pythonbuild.utils import (
     extract_zip_to_directory,
     compress_python_archive,
     file_text_replace,
+    file_xml_edit,
 )
 
 ROOT = pathlib.Path(os.path.abspath(__file__)).parent.parent
@@ -1120,7 +1121,18 @@ def hack_source_files(source_path: pathlib.Path, static: bool):
         static_replace_in_file(
             layout_main, b"    yield from in_build(PYTHON_DLL_NAME)\n", b""
         )
-
+        
+def hack_vcxproj_files(path, *, static):
+    file_xml_edit(
+        list(path.glob('*.vcxproj')), [
+            (
+                'repc',
+                ['Project'],
+                ['ItemDefinitionGroup', 'ClCompile', 'RuntimeLibrary'],
+                {True: 'MultiThreaded', False: 'MultiThreadedDLL'}[static],
+            ),
+        ],
+    )
 
 def run_msbuild(
     msbuild: pathlib.Path,
@@ -1766,6 +1778,7 @@ def build_cpython(
 
         hack_project_files(td, cpython_source_path, build_directory, static=static)
         hack_source_files(cpython_source_path, static=static)
+        hack_vcxproj_files(pcbuild_path, static=static)
 
         if pgo:
             run_msbuild(
