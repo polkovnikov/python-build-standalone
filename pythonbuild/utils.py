@@ -6,6 +6,7 @@ import gzip
 import hashlib
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -251,3 +252,25 @@ def exec_and_log(args, cwd, env):
     if p.returncode:
         print("process exited %d" % p.returncode)
         sys.exit(p.returncode)
+
+def file_text_replace(fname, repls, *, enc = 'utf-8', dst_fname = None):
+    if dst_fname is None:
+        dst_fname = fname
+    with open(fname, 'r', encoding = enc) as f:
+        text = f.read()
+    for rfrom, rto in repls:
+        if type(rfrom) is str:
+            assert type(rto) is str
+            text = text.replace(rfrom, rto)
+        elif type(rfrom) is re.Pattern:
+            if type(rto) is str:
+                text = re.sub(rfrom, rto, text)
+            elif callable(rto):
+                for m in reversed(list(re.finditer(rfrom, text))):
+                    text = text[:m.start()] + rto(m) + text[m.end():]
+            else:
+                assert False
+        else:
+            assert False
+    with open(dst_fname, 'w', encoding = enc) as f:
+        f.write(text)
